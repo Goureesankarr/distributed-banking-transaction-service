@@ -1,0 +1,99 @@
+{
+  "uid": "banking-transactions",
+  "title": "Banking Transaction Service",
+  "tags": ["banking", "transactions"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Transfers completed / sec",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(banking_transfer_completed_total[5m]))", "legendFormat": "completed" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Transfers rejected / sec",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(banking_transfer_failed_total[5m]))", "legendFormat": "rejected" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Optimistic lock retries / sec",
+      "description": "Attempts that lost the version race and were replayed. Sustained growth means a hot account.",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(banking_transfer_optimistic_retries_total[5m]))", "legendFormat": "retries" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Outbox backlog",
+      "description": "Events committed to Postgres but not yet on Kafka. Should hover near zero.",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        { "expr": "sum(banking_outbox_pending)", "legendFormat": "pending" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Transfer latency",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        { "expr": "banking_transfer_duration_seconds{quantile=\"0.5\"}", "legendFormat": "p50" },
+        { "expr": "banking_transfer_duration_seconds{quantile=\"0.95\"}", "legendFormat": "p95" },
+        { "expr": "banking_transfer_duration_seconds{quantile=\"0.99\"}", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rejections by reason",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        { "expr": "sum by (reason) (rate(banking_transfer_failed_total[5m]))", "legendFormat": "{{reason}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Idempotent replays vs new transfers",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "targets": [
+        { "expr": "sum(rate(banking_transfer_idempotent_replays_total[5m]))", "legendFormat": "replayed" },
+        { "expr": "sum(rate(banking_transfer_completed_total[5m]))", "legendFormat": "new" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Rate limiting",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "targets": [
+        { "expr": "sum(rate(banking_ratelimit_throttled_total[5m]))", "legendFormat": "throttled (429)" },
+        { "expr": "sum(rate(banking_ratelimit_failed_open_total[5m]))", "legendFormat": "failed open" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Kafka events consumed",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "targets": [
+        { "expr": "sum by (type) (rate(banking_events_consumed_total[5m]))", "legendFormat": "{{type}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP request rate by status",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "targets": [
+        { "expr": "sum by (status) (rate(http_server_requests_seconds_count[5m]))", "legendFormat": "{{status}}" }
+      ]
+    }
+  ]
+}

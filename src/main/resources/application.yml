@@ -1,0 +1,121 @@
+spring:
+  application:
+    name: transaction-service
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/banking}
+    username: ${DB_USER:banking}
+    password: ${DB_PASSWORD:banking}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+      minimum-idle: 5
+      pool-name: banking-pool
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+        order_inserts: true
+        order_updates: true
+        jdbc.batch_size: 25
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+
+  cache:
+    type: redis
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all
+      retries: 5
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 30000
+    consumer:
+      group-id: ${KAFKA_GROUP_ID:transaction-service}
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      ack-mode: record
+      concurrency: 3
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: never
+  shutdown: graceful
+
+banking:
+  jwt:
+    # 256-bit base64 secret. MUST be overridden outside local development.
+    secret: ${JWT_SECRET:ZGV2LW9ubHktc2VjcmV0LWtleS1jaGFuZ2UtbWUtaW4tcHJvZHVjdGlvbi0xMjM0}
+    issuer: distributed-banking-transaction-service
+    access-token-ttl: 30m
+  idempotency:
+    ttl: 24h
+  rate-limit:
+    enabled: true
+    # Token bucket applied per authenticated user (or client IP when anonymous).
+    default-capacity: 100
+    default-refill-per-minute: 100
+    # Money movement gets a tighter budget than read traffic.
+    transfer-capacity: 20
+    transfer-refill-per-minute: 20
+  outbox:
+    poll-interval-ms: 500
+    batch-size: 100
+    max-attempts: 10
+  kafka:
+    topics:
+      transactions: banking.transactions.v1
+      audit: banking.audit.v1
+      dlt: banking.transactions.dlt
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    com.bank.txn: INFO
+    org.hibernate.orm.jdbc.bind: WARN
+    # Losing a version race is a normal, retried outcome here, but Hibernate
+    # logs every one of them at ERROR before rethrowing. The exception still
+    # propagates and is handled; watch banking_transfer_optimistic_retries_total
+    # for the real signal.
+    org.hibernate.orm.jdbc.batch: 'OFF'
