@@ -45,8 +45,8 @@ public class TransferExecutor {
 
     /**
      * Moves the money, posts both ledger legs and queues the domain event, all
-     * all in one database transaction, so the service can never be observed
-     * with a debit that has no matching credit.
+     * in one database transaction, so the service can never be observed with a
+     * debit that has no matching credit.
      */
     @Transactional
     public Transfer execute(TransferCommand command) {
