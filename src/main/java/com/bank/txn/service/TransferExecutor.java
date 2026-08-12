@@ -71,8 +71,8 @@ public class TransferExecutor {
         source.debit(command.amount(), command.currency());
         target.credit(command.amount(), command.currency());
 
-        // Flush the two account UPDATEs in a globally consistent order. A→B and
-        // B→A transfers running at the same time would otherwise be able to
+        // Flush the two account UPDATEs in a globally consistent order. A->B and
+        // B->A transfers running at the same time would otherwise be able to
         // grab each other's row locks and deadlock in the database.
         boolean sourceFirst = source.getId().compareTo(target.getId()) < 0;
         accounts.saveAndFlush(sourceFirst ? source : target);

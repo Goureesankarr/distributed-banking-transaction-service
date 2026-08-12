@@ -11,8 +11,6 @@ onto Kafka without a dual write.
 
 **Java 21, Spring Boot 3.3, PostgreSQL, Redis, Kafka, Docker, Testcontainers, Prometheus + Grafana**
 
----
-
 ## What it does
 
 | Capability | How |
@@ -23,45 +21,32 @@ onto Kafka without a dual write.
 | Concurrency safety | JPA `@Version` optimistic locking with a bounded, jittered retry loop |
 | Transaction history | Paged, date-filtered, per account |
 | Double-entry ledger | Two balanced legs per transfer, reconcilable independently of balances |
-| Event streaming | Transactional outbox → Kafka, at-least-once, idempotent consumer, DLT |
+| Event streaming | Transactional outbox -> Kafka, at-least-once, idempotent consumer, DLT |
 | Rate limiting | Redis token bucket in a Lua script, separate budget for money movement |
 | Caching | Redis read-through cache for account lookups, evicted after commit |
 | Auth | Stateless JWT (HS256), BCrypt, role-based access |
 | Audit logs | Append-only trail written in its own transaction so rejections survive rollback |
-| Metrics | Micrometer → Prometheus → provisioned Grafana dashboard |
-
----
+| Metrics | Micrometer -> Prometheus -> provisioned Grafana dashboard |
 
 ## Architecture
 
-```
-                    ┌──────────────┐
-   client ────────▶ │ JWT filter   │
-                    ├──────────────┤
-                    │ Rate limiter │──────▶ Redis  (token bucket, Lua)
-                    ├──────────────┤
-                    │ Controllers  │
-                    └──────┬───────┘
-                           │
-                  ┌────────▼─────────┐
-                  │  TransferService │  idempotency claim → retry loop → audit
-                  └────────┬─────────┘
-                           │  (one transaction per attempt)
-                  ┌────────▼─────────┐
-                  │  TransferExecutor│  debit + credit + 2 ledger legs + outbox row
-                  └────────┬─────────┘
-                           │
-                     PostgreSQL  ◀──── Redis (account cache, evicted post-commit)
-                           │
-                  ┌────────▼─────────┐
-                  │  OutboxPublisher │  FOR UPDATE SKIP LOCKED, every 500 ms
-                  └────────┬─────────┘
-                           ▼
-                        Kafka  ──▶ TransactionEventConsumer ──▶ audit / metrics
-                                        └── poison messages ──▶ DLT
-```
+A request path, and the relay that runs behind it:
 
----
+```
+client
+  -> JwtAuthenticationFilter
+  -> RateLimitFilter          Redis token bucket, Lua script
+  -> TransferController
+       -> TransferService     idempotency claim, retry loop, audit
+            -> TransferExecutor    one transaction per attempt:
+                                   debit + credit + two ledger legs + outbox row
+                 -> PostgreSQL     Redis account cache evicted after commit
+
+OutboxPublisher    polls outbox_event every 500 ms, FOR UPDATE SKIP LOCKED
+  -> Kafka
+       -> TransactionEventConsumer   -> audit, metrics
+                                     -> poison messages to the DLT
+```
 
 ## Design notes
 
@@ -71,14 +56,14 @@ onto Kafka without a dual write.
 computed; the `UPDATE` carries `WHERE version = ?` and a loser gets
 `OptimisticLockingFailureException`.
 
-The retry loop lives in `TransferService`, **outside** the transaction, because a retry
+The retry loop lives in `TransferService`, *outside* the transaction, because a retry
 needs a fresh transaction and a fresh persistence context, and retrying inside the failed
 transaction would just replay stale state. Backoff is randomised so a burst of writers on
 one hot account doesn't retry in lockstep. After five contended attempts the caller gets
 `409` and can retry with the same idempotency key.
 
-`TransferExecutor` also flushes the two account updates in account-id order, so an A→B
-transfer and a concurrent B→A transfer can't grab each other's row locks and deadlock.
+`TransferExecutor` also flushes the two account updates in account-id order, so an A->B
+transfer and a concurrent B->A transfer can't grab each other's row locks and deadlock.
 
 Covered by `TransferConcurrencyIT`: 20 threads, one source account, exact final balances,
 and a second test where ten writers compete for three transfers' worth of funds and the
@@ -86,7 +71,7 @@ balance floor holds at zero.
 
 ### Idempotency
 
-`POST /api/v1/transfers` **requires** an `Idempotency-Key`.
+`POST /api/v1/transfers` requires an `Idempotency-Key`.
 
 * The `(idempotency_key, username)` unique index is the concurrency primitive: two
   simultaneous retries race to `INSERT` a claim, exactly one wins, the loser gets `409`.
@@ -95,7 +80,7 @@ balance floor holds at zero.
 * Reusing a key with a *different* body is `422`, not a silent wrong replay. The request
   is hashed with SHA-256 and compared.
 * Deterministic business rejections (insufficient funds) are bound to the key too.
-  Transient failures (lock contention) **release** the key, because pinning a key to an
+  Transient failures (lock contention) release the key, because pinning a key to an
   error the request didn't really cause would be wrong.
 
 ### Transactional outbox instead of a dual write
@@ -116,11 +101,9 @@ A token bucket implemented as a single Lua script, so check-and-decrement is ato
 inside Redis and every instance shares one budget per principal. Money movement gets a
 tighter bucket than reads.
 
-If Redis is unreachable the limiter **fails open**. Rejecting live banking traffic
+If Redis is unreachable the limiter fails open. Rejecting live banking traffic
 because a cache node is down turns a degraded dependency into an outage. Fail-open events
 are counted (`banking_ratelimit_failed_open_total`) so they're visible in Grafana.
-
----
 
 ## Running it
 
@@ -165,8 +148,6 @@ and the balances don't move.
 curl -s "localhost:8080/api/v1/accounts/ACC.../transfers?page=0&size=20" -H "Authorization: Bearer $TOKEN"
 ```
 
----
-
 ## Tests
 
 ```bash
@@ -201,8 +182,6 @@ Using Colima instead of Docker Desktop, export these first:
 export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock" && export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 ```
 
----
-
 ## Observability
 
 `/actuator/prometheus` exposes, alongside the standard JVM and HTTP metrics:
@@ -223,8 +202,6 @@ than zero means money was created or destroyed.
 
 The Grafana dashboard in `ops/grafana/dashboards/` is provisioned automatically.
 
----
-
 ## Configuration
 
 Everything below is environment-overridable; defaults suit a laptop.
@@ -234,13 +211,11 @@ Everything below is environment-overridable; defaults suit a laptop.
 | `DB_URL` / `DB_USER` / `DB_PASSWORD` | local Postgres | |
 | `REDIS_HOST` / `REDIS_PORT` | `localhost:6379` | |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | |
-| `JWT_SECRET` | dev-only base64 key | **Must** be replaced outside local dev; 256 bits or more |
+| `JWT_SECRET` | dev-only base64 key | Must be replaced outside local dev; 256 bits or more |
 | `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` | unset | No admin is created unless the password is set |
 | `banking.rate-limit.*` | 100/min reads, 20/min transfers | Per principal |
 | `banking.idempotency.ttl` | 24h | Replay window |
 | `banking.outbox.poll-interval-ms` | 500 | Relay cadence |
-
----
 
 ## Known limits
 
